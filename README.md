@@ -48,6 +48,7 @@
 - **Renderizado GPU directo:** rasterización de curvas Bézier mediante compute shaders con `vello` (`0.12`) sobre `wgpu`, con caché de geometría por elemento.
 - **Trazos libres con presión real:** contorno de grosor variable (`perfect-freehand`) que registra `pressures` y `simulatePressure` en `.excalidraw`, usando la presión real del lápiz en Wayland (`winit 0.31`) y simulación por velocidad con ratón.
 - **Figuras, texto e imágenes:** rectángulos, rombos, elipses, líneas y flechas multipunto con *bindings*, texto multilínea con fuentes WOFF2 embebidas, etiquetas dentro de figuras, imágenes (`PNG`, `JPEG`, `GIF`, `WebP`, `BMP`), rellenos (`solid`, `hachure`, `cross-hatch`, `zigzag`), rugosidad, esquinas redondeadas, rotación, paleta de colores y orden de capas.
+- **Modo oscuro:** botón en la esquina superior derecha o `Alt+Shift+D`. Como en Excalidraw, solo cambia cómo se muestran los colores (el archivo no se modifica) y las imágenes conservan los suyos; la preferencia se recuerda en `~/.config/board/theme` y se puede forzar con `--dark` o `--light`.
 - **Interoperabilidad `.excalidraw`:** abre, edita y guarda archivos `.excalidraw` preservando campos desconocidos, copia/pega en formato Excalidraw y exporta a SVG y PNG desde línea de comandos.
 
 ## Compilar y ejecutar
@@ -62,7 +63,10 @@ cargo run --release -p board-app -- samples/demo.excalidraw
 # Exportación headless a SVG / PNG
 cargo run --release -p board-app -- samples/demo.excalidraw --svg salida.svg --png salida.png
 
-# Generar captura de la interfaz sin abrir ventana
+# Abrir en modo oscuro (o --light para forzar el claro)
+cargo run --release -p board-app -- samples/demo.excalidraw --dark
+
+# Generar captura de la interfaz sin abrir ventana (añade "dark" para el modo oscuro)
 cargo run -p board-app --example ui_snapshot -- docs/screenshots/editor-ui.png
 
 # Ejecutar tests del núcleo

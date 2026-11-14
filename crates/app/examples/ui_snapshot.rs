@@ -4,10 +4,11 @@
 //!
 //! ```sh
 //! cargo run -p board-app --example ui_snapshot -- out.png
+//! cargo run -p board-app --example ui_snapshot -- out-dark.png dark
 //! ```
 
 use board_core::kurbo::Point;
-use board_core::{Button, Editor, Key, Modifiers};
+use board_core::{Button, Editor, Key, Modifiers, Theme};
 
 #[path = "../src/render.rs"]
 mod render;
@@ -19,6 +20,9 @@ fn main() {
     let none = Modifiers::default();
     let mut ed = Editor::new(7);
     ed.resize(f64::from(SIZE.0), f64::from(SIZE.1));
+    if std::env::args().nth(2).as_deref() == Some("dark") {
+        ed.set_theme(Theme::Dark);
+    }
     let drag = |ed: &mut Editor, tool: char, from: (f64, f64), to: (f64, f64)| {
         ed.key_down(Key::Char(tool), none);
         ed.pointer_down(Point::from(from), Button::Primary, none);

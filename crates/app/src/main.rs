@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use board_core::kurbo::{Point, Rect, Vec2};
 use base64::Engine;
-use board_core::{export, Button, Cursor, Document, Editor, Key, Modifiers, Request};
+use board_core::{export, Button, Cursor, Document, Editor, Key, Modifiers, Request, Theme};
 use vello::util::{RenderContext, RenderSurface};
 use vello::wgpu;
 use vello::{AaConfig, RenderParams, Renderer, Scene};
@@ -46,6 +46,8 @@ const DOUBLE_CLICK_TIME: Duration = Duration::from_millis(400);
 const DOUBLE_CLICK_DISTANCE: f64 = 4.0;
 
 struct App {
+    /// The editor's theme as last seen, to notice when the user switches it.
+    theme: Theme,
     context: RenderContext,
     renderers: Vec<Option<Renderer>>,
     surface: Option<(RenderSurface<'static>, Arc<dyn Window>)>,
@@ -415,6 +417,10 @@ impl ApplicationHandler for App {
         if self.editor.take_request() == Some(Request::PickImage) {
             self.pick_image();
         }
+        if self.editor.theme() != self.theme {
+            self.theme = self.editor.theme();
+            remember_theme(self.theme);
+        }
         self.update_title();
         if let Some((_, window)) = &self.surface {
             let icon = match self.editor.cursor() {
@@ -441,15 +447,49 @@ fn untitled_path() -> PathBuf {
         .expect("some untitled name is free")
 }
 
+/// Where the chosen theme is remembered between runs:
+/// `$XDG_CONFIG_HOME/board/theme` (or `~/.config/board/theme`).
+fn theme_file() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
+    Some(config.join("board").join("theme"))
+}
+
+fn remembered_theme() -> Option<Theme> {
+    match std::fs::read_to_string(theme_file()?).ok()?.trim() {
+        "dark" => Some(Theme::Dark),
+        "light" => Some(Theme::Light),
+        _ => None,
+    }
+}
+
+fn remember_theme(theme: Theme) {
+    let name = match theme {
+        Theme::Light => "light",
+        Theme::Dark => "dark",
+    };
+    let saved = theme_file().ok_or_else(|| "no home directory".to_owned()).and_then(|file| {
+        let dir = file.parent().expect("the theme file is inside a directory");
+        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, name)).map_err(|e| e.to_string())
+    });
+    if let Err(err) = saved {
+        eprintln!("could not remember the theme: {err}");
+    }
+}
+
 struct Args {
     file: Option<PathBuf>,
     svg: Option<PathBuf>,
     png: Option<PathBuf>,
     scale: f64,
+    /// Theme forced for this run, overriding the remembered one.
+    theme: Option<Theme>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { file: None, svg: None, png: None, scale: 1.0 };
+    let mut args = Args { file: None, svg: None, png: None, scale: 1.0, theme: None };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -459,6 +499,8 @@ fn parse_args() -> Result<Args, String> {
                 let value = it.next().ok_or("--scale needs a number")?;
                 args.scale = value.parse().ok().filter(|s| *s > 0.0).ok_or("--scale must be a positive number")?;
             }
+            "--dark" => args.theme = Some(Theme::Dark),
+            "--light" => args.theme = Some(Theme::Light),
             "-h" | "--help" => return Err(String::new()),
             flag if flag.starts_with('-') => return Err(format!("unknown option {flag}")),
             _ if args.file.is_none() => args.file = Some(arg.into()),
@@ -473,7 +515,7 @@ fn main() {
         if !err.is_empty() {
             eprintln!("error: {err}");
         }
-        eprintln!("usage: board-app [FILE.excalidraw] [--svg OUT.svg] [--png OUT.png [--scale N]]");
+        eprintln!("usage: board-app [FILE.excalidraw] [--dark | --light] [--svg OUT.svg] [--png OUT.png [--scale N]]");
         std::process::exit(2);
     });
 
@@ -516,7 +558,9 @@ fn main() {
     if let Some(doc) = document {
         editor.load(doc);
     }
+    editor.set_theme(args.theme.or_else(remembered_theme).unwrap_or_default());
     let app = App {
+        theme: editor.theme(),
         context: RenderContext::new(),
         renderers: Vec::new(),
         surface: None,

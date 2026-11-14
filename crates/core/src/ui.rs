@@ -10,13 +10,69 @@ use crate::element::{FillStyle, StrokeStyle};
 use crate::rough::{Options, Rough};
 use crate::text;
 
-pub(crate) const ACCENT: Color = Color::rgba(105, 101, 219, 255);
-const INK: Color = Color::rgba(30, 30, 30, 255);
-const ACTIVE_INK: Color = Color::rgba(3, 0, 100, 255);
-const ACTIVE_BG: Color = Color::rgba(224, 223, 255, 255);
-const BUTTON_BG: Color = Color::rgba(236, 236, 244, 255);
-const BORDER: Color = Color::rgba(214, 214, 214, 255);
-const LABEL: Color = Color::rgba(73, 80, 87, 255);
+/// Light or dark appearance of the canvas and the chrome.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Theme {
+    #[default]
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub fn toggled(self) -> Theme {
+        match self {
+            Theme::Light => Theme::Dark,
+            Theme::Dark => Theme::Light,
+        }
+    }
+}
+
+/// The chrome's colors in one theme.
+pub(crate) struct Colors {
+    /// Selection outlines, handles and the slider.
+    pub accent: Color,
+    /// The empty canvas, also used to fill handles.
+    pub canvas: Color,
+    /// Whether element colors are shown in their dark rendition.
+    dark: bool,
+    panel: Color,
+    border: Color,
+    ink: Color,
+    active_ink: Color,
+    active_bg: Color,
+    button_bg: Color,
+    label: Color,
+}
+
+/// Excalidraw's light and dark interface colors.
+pub(crate) fn colors(theme: Theme) -> Colors {
+    match theme {
+        Theme::Light => Colors {
+            accent: Color::rgba(105, 101, 219, 255),
+            canvas: Color::WHITE,
+            dark: false,
+            panel: Color::WHITE,
+            border: Color::rgba(214, 214, 214, 255),
+            ink: Color::rgba(30, 30, 30, 255),
+            active_ink: Color::rgba(3, 0, 100, 255),
+            active_bg: Color::rgba(224, 223, 255, 255),
+            button_bg: Color::rgba(236, 236, 244, 255),
+            label: Color::rgba(73, 80, 87, 255),
+        },
+        Theme::Dark => Colors {
+            accent: Color::rgba(168, 165, 255, 255),
+            canvas: Color::rgba(18, 18, 18, 255),
+            dark: true,
+            panel: Color::rgba(35, 35, 41, 255),
+            border: Color::rgba(62, 62, 74, 255),
+            ink: Color::rgba(227, 227, 232, 255),
+            active_ink: Color::rgba(224, 223, 255, 255),
+            active_bg: Color::rgba(79, 77, 111, 255),
+            button_bg: Color::rgba(49, 48, 59, 255),
+            label: Color::rgba(173, 173, 184, 255),
+        },
+    }
+}
 
 const TOOLBAR_TOP: f64 = 12.0;
 const TOOLBAR_PADDING: f64 = 6.0;
@@ -113,6 +169,8 @@ pub(crate) enum Action {
     Background(&'static str),
     /// Opens or closes the full palette for a color.
     Palette(ColorTarget),
+    /// Switches to this theme.
+    Theme(Theme),
     Fill(FillStyle),
     StrokeWidth(f64),
     StrokeStyle(StrokeStyle),
@@ -196,16 +254,31 @@ pub(crate) struct Chrome {
     pub buttons: Vec<Button>,
     /// Opacity track and its current value.
     slider: Option<(Rect, f64)>,
+    theme: Theme,
 }
 
-/// Lays out the toolbar and, when `panel` is given, the style panel showing
-/// `style`, with the palette popup for `palette` open beside it.
+/// Lays out the toolbar, the theme switch and, when `panel` is given, the
+/// style panel showing `style`, with the palette popup for `palette` open
+/// beside it.
 pub(crate) fn layout(
     size: Size,
     tool: Tool,
     panel: Option<(&Style, Sections)>,
     palette: Option<ColorTarget>,
+    theme: Theme,
 ) -> Chrome {
+    let mut chrome = layout_tools(size, tool, panel, palette);
+    chrome.theme = theme;
+    // The theme switch sits alone in the top-right corner.
+    let side = TOOL_BUTTON + 2.0 * TOOLBAR_PADDING;
+    let corner = Point::new(size.width - PANEL_LEFT - side, TOOLBAR_TOP);
+    chrome.panels.push(Rect::from_origin_size(corner, (side, side)));
+    let rect = Rect::from_origin_size(corner + (TOOLBAR_PADDING, TOOLBAR_PADDING), (TOOL_BUTTON, TOOL_BUTTON));
+    chrome.buttons.push(Button { rect, action: Action::Theme(theme.toggled()), active: false, color: None });
+    chrome
+}
+
+fn layout_tools(size: Size, tool: Tool, panel: Option<(&Style, Sections)>, palette: Option<ColorTarget>) -> Chrome {
     let mut chrome = Chrome::default();
 
     let n = Tool::ALL.len() as f64;
@@ -346,29 +419,33 @@ impl Chrome {
     }
 
     pub fn draw(&self, ops: &mut Vec<DrawOp>) {
+        let colors = colors(self.theme);
         for panel in &self.panels {
             let shape = RoundedRect::from_rect(*panel, 10.0).to_path(0.1);
-            ops.push(DrawOp::fill(shape.clone(), Color::WHITE));
-            ops.push(DrawOp::stroke(shape, BORDER, 1.0));
+            ops.push(DrawOp::fill(shape.clone(), colors.panel));
+            ops.push(DrawOp::stroke(shape, colors.border, 1.0));
         }
         let mut labels = BezPath::new();
         for (baseline, label) in &self.labels {
             text::append_line(label, UI_FONT, LABEL_SIZE, *baseline, &mut labels);
         }
-        ops.push(DrawOp::fill(labels, LABEL));
+        ops.push(DrawOp::fill(labels, colors.label));
 
         for button in &self.buttons {
-            let is_tool = matches!(button.action, Action::Tool(_));
-            if button.active || !is_tool {
+            // Toolbar buttons have no backdrop of their own until active.
+            let bare = matches!(button.action, Action::Tool(_) | Action::Theme(_));
+            if button.active || !bare {
                 let bg = RoundedRect::from_rect(button.rect, 8.0).to_path(0.1);
-                ops.push(DrawOp::fill(bg, if button.active { ACTIVE_BG } else { BUTTON_BG }));
+                ops.push(DrawOp::fill(bg, if button.active { colors.active_bg } else { colors.button_bg }));
             }
             let origin = button.rect.center() - (ICON / 2.0, ICON / 2.0);
             let place = Affine::translate(origin.to_vec2());
-            let ink = if button.active { ACTIVE_INK } else { INK };
-            let glyph = match &button.color {
-                Some(color) => swatch(color),
-                None => icon(button.action, ink),
+            let ink = if button.active { colors.active_ink } else { colors.ink };
+            let swatch = |color: &str| swatch(color, &colors);
+            let glyph = match (&button.color, button.action) {
+                (Some(color), _) => swatch(color),
+                (None, Action::Stroke(color) | Action::Background(color)) => swatch(color),
+                (None, action) => icon(action, ink),
             };
             for mut op in glyph {
                 op.path = place * op.path;
@@ -380,9 +457,9 @@ impl Chrome {
             let mid = track.center().y;
             let knob_x = track.x0 + track.width() * value / 100.0;
             let bar = |x1: f64| RoundedRect::new(track.x0, mid - 3.0, x1, mid + 3.0, 3.0).to_path(0.1);
-            ops.push(DrawOp::fill(bar(track.x1), BUTTON_BG));
-            ops.push(DrawOp::fill(bar(knob_x), ACCENT));
-            ops.push(DrawOp::fill(Circle::new((knob_x, mid), KNOB_RADIUS).to_path(0.1), ACCENT));
+            ops.push(DrawOp::fill(bar(track.x1), colors.button_bg));
+            ops.push(DrawOp::fill(bar(knob_x), colors.accent));
+            ops.push(DrawOp::fill(Circle::new((knob_x, mid), KNOB_RADIUS).to_path(0.1), colors.accent));
         }
     }
 }
@@ -415,20 +492,28 @@ fn letter(label: &str, family: i64, size: f64, color: Color) -> DrawOp {
     DrawOp::fill(path, color)
 }
 
-fn swatch(color: &str) -> Vec<DrawOp> {
+/// A color sample. As in Excalidraw, it shows the color the way the canvas
+/// will draw it in the current theme.
+fn swatch(color: &str, colors: &Colors) -> Vec<DrawOp> {
     let shape = RoundedRect::new(1.0, 1.0, 19.0, 19.0, 4.0).to_path(0.1);
     let color = Color::parse(color).unwrap_or(Color::TRANSPARENT);
+    let color = if colors.dark { color.dark() } else { color };
     if color.is_transparent() {
         // Checkerboard, the usual stand-in for "no color".
         let squares = [(1.0, 1.0), (10.0, 10.0)].map(|(x, y)| Rect::new(x, y, x + 9.0, y + 9.0).to_path(0.1));
         vec![
-            DrawOp::fill(shape.clone(), Color::WHITE),
-            DrawOp::fill(join(&squares), BORDER),
-            DrawOp::stroke(shape, BORDER, 1.0),
+            DrawOp::fill(shape.clone(), colors.panel),
+            DrawOp::fill(join(&squares), colors.border),
+            DrawOp::stroke(shape, colors.border, 1.0),
         ]
     } else {
-        vec![DrawOp::fill(shape.clone(), color), DrawOp::stroke(shape, Color { a: 40, ..INK }, 1.0)]
+        vec![DrawOp::fill(shape.clone(), color), DrawOp::stroke(shape, Color { a: 40, ..colors.ink }, 1.0)]
     }
+}
+
+/// Feather-style 24px icon outline, scaled to the icon box.
+fn outline_24(svg: &str) -> BezPath {
+    Affine::scale(ICON / 24.0) * BezPath::from_svg(svg).expect("icon path is valid")
 }
 
 /// The glyph for a button, drawn in a 20×20 box.
@@ -455,9 +540,15 @@ fn icon(action: Action, ink: Color) -> Vec<DrawOp> {
     };
     match action {
         Action::Tool(tool) => stroke(tool_icon(tool)),
-        Action::Stroke(color) | Action::Background(color) => swatch(color),
-        // Drawn from the button's own color.
-        Action::Palette(_) => Vec::new(),
+        // Color buttons are drawn as swatches by `Chrome::draw`.
+        Action::Stroke(_) | Action::Background(_) | Action::Palette(_) => Vec::new(),
+        // The button shows where it leads: a moon in light mode, a sun in dark.
+        Action::Theme(Theme::Dark) => stroke(outline_24("M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z")),
+        Action::Theme(Theme::Light) => {
+            let rays = "M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42\
+                        M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42";
+            stroke(join(&[Circle::new((10.0, 10.0), 4.2).to_path(0.1), outline_24(rays)]))
+        }
         Action::Fill(FillStyle::Solid) => {
             vec![DrawOp::fill(frame(), ink)]
         }
@@ -583,32 +674,62 @@ mod tests {
 
     #[test]
     fn toolbar_alone_has_one_button_per_tool() {
-        let chrome = layout(Size::new(1000.0, 700.0), Tool::Arrow, None, None);
-        assert_eq!(chrome.buttons.len(), Tool::ALL.len());
+        let chrome = layout(Size::new(1000.0, 700.0), Tool::Arrow, None, None, Theme::Light);
+        let tools: Vec<&Button> = chrome.buttons.iter().filter(|b| matches!(b.action, Action::Tool(_))).collect();
+        assert_eq!(tools.len(), Tool::ALL.len());
         assert_eq!(chrome.buttons.iter().filter(|b| b.active).count(), 1);
         let bar = chrome.panels[0];
-        assert!((bar.center().x - 500.0).abs() <= 0.5 && chrome.buttons.iter().all(|b| bar.contains_rect(b.rect)));
+        assert!((bar.center().x - 500.0).abs() <= 0.5 && tools.iter().all(|b| bar.contains_rect(b.rect)));
+    }
+
+    #[test]
+    fn theme_switch_sits_in_the_corner_and_leads_to_the_other_theme() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let chrome = layout(Size::new(1000.0, 700.0), Tool::Select, None, None, theme);
+            let switch = chrome.buttons.last().unwrap();
+            assert_eq!(switch.action, Action::Theme(theme.toggled()));
+            let corner = *chrome.panels.last().unwrap();
+            assert!(corner.contains_rect(switch.rect) && corner.x1 == 988.0 && corner.x0 > chrome.panels[0].x1);
+            assert!(matches!(chrome.hit(switch.rect.center()), Some(Hit::Button(Action::Theme(_)))));
+        }
+    }
+
+    #[test]
+    fn chrome_is_drawn_in_the_theme_colors() {
+        let style = Style::default();
+        let draw = |theme| {
+            let mut ops = Vec::new();
+            layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None, theme).draw(&mut ops);
+            ops
+        };
+        let (light, dark) = (draw(Theme::Light), draw(Theme::Dark));
+        assert_eq!(light.len(), dark.len());
+        assert_eq!((light[0].color, dark[0].color), (Color::WHITE, Color::rgba(35, 35, 41, 255)));
+        // Color samples show what the canvas will draw.
+        let red = Color::parse("#e03131").unwrap();
+        assert!(light.iter().any(|op| op.color == red) && !dark.iter().any(|op| op.color == red));
+        assert!(dark.iter().any(|op| op.color == red.dark()));
     }
 
     #[test]
     fn panel_contains_its_widgets_and_marks_current_values() {
         let style = Style { background_color: "#FFC9C9".into(), ..Style::default() };
-        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None);
+        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None, Theme::Light);
         let panel = chrome.panels[1];
-        let widgets = chrome.buttons.iter().filter(|b| !matches!(b.action, Action::Tool(_)));
+        let widgets = chrome.buttons.iter().filter(|b| !matches!(b.action, Action::Tool(_) | Action::Theme(_)));
         assert!(widgets.clone().all(|b| panel.contains_rect(b.rect)));
         let active: Vec<Action> = widgets.filter(|b| b.active).map(|b| b.action).collect();
         assert!(active.contains(&Action::Background("#ffc9c9")) && active.contains(&Action::StrokeWidth(2.0)));
         assert!(active.contains(&Action::Round(true)) && active.contains(&Action::FontFamily(5)));
 
-        let fewer = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, Sections::default())), None);
+        let fewer = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, Sections::default())), None, Theme::Light);
         assert!(fewer.panels[1].height() < panel.height());
     }
 
     #[test]
     fn hits_buttons_slider_and_dead_space() {
         let style = Style::default();
-        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None);
+        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None, Theme::Light);
         let red = chrome.buttons.iter().find(|b| b.action == Action::Stroke("#e03131")).unwrap();
         assert!(matches!(chrome.hit(red.rect.center()), Some(Hit::Button(Action::Stroke("#e03131")))));
         let (track, _) = chrome.slider.unwrap();
@@ -621,9 +742,10 @@ mod tests {
     #[test]
     fn every_button_has_an_icon() {
         let style = Style::default();
-        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None);
-        for button in chrome.buttons.iter().filter(|b| b.color.is_none()) {
-            let ops = icon(button.action, INK);
+        let chrome = layout(Size::new(1000.0, 900.0), Tool::Select, Some((&style, all())), None, Theme::Light);
+        let is_swatch = |b: &&Button| b.color.is_some() || matches!(b.action, Action::Stroke(_) | Action::Background(_));
+        for button in chrome.buttons.iter().filter(|b| !is_swatch(b)) {
+            let ops = icon(button.action, colors(Theme::Light).ink);
             assert!(!ops.is_empty() && ops.iter().all(|op| !op.path.is_empty()), "{:?}", button.action);
         }
     }
@@ -632,12 +754,12 @@ mod tests {
     fn palette_popup_offers_every_color_beside_the_panel() {
         let style = Style { stroke_color: "#9c36b5".into(), ..Style::default() };
         let size = Size::new(1000.0, 900.0);
-        let closed = layout(size, Tool::Select, Some((&style, all())), None);
+        let closed = layout(size, Tool::Select, Some((&style, all())), None, Theme::Light);
         let opener = closed.buttons.iter().find(|b| b.action == Action::Palette(ColorTarget::Stroke)).unwrap();
         assert!(opener.active && opener.color.as_deref() == Some("#9c36b5"), "a custom color lights the opener");
         assert!(!closed.buttons.iter().any(|b| b.action == Action::Stroke("#9c36b5")));
 
-        let open = layout(size, Tool::Select, Some((&style, all())), Some(ColorTarget::Stroke));
+        let open = layout(size, Tool::Select, Some((&style, all())), Some(ColorTarget::Stroke), Theme::Light);
         // Panels: toolbar, popup, style panel.
         let (popup, panel) = (open.panels[1], open.panels[2]);
         let swatches: Vec<&Button> = open.buttons.iter().filter(|b| popup.contains_rect(b.rect)).collect();

@@ -20,6 +20,6 @@ pub mod text;
 mod ui;
 
 pub use draw::{Color, Crop, DrawOp, Frame, Item, Style};
-pub use editor::{Button, Cursor, Editor, Key, Modifiers, Request, Tool};
+pub use editor::{Button, Cursor, Editor, Key, Modifiers, Request, Theme, Tool};
 pub use element::{Document, Element, Kind};
 pub use kurbo;
