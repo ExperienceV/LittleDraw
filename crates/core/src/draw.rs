@@ -45,6 +45,23 @@ impl Color {
     pub fn is_transparent(self) -> bool {
         self.a == 0
     }
+
+    /// The color as shown in dark mode. Like Excalidraw, which filters its
+    /// canvas with `invert(93%) hue-rotate(180deg)`: light and dark swap
+    /// while hues stay recognizable. Alpha is kept.
+    pub fn dark(self) -> Color {
+        const INVERT: f64 = 0.93;
+        let invert = |c: u8| (f64::from(c) * (1.0 - INVERT) + f64::from(255 - c) * INVERT).round() / 255.0;
+        let (r, g, b) = (invert(self.r), invert(self.g), invert(self.b));
+        // The CSS hue-rotate matrix at 180°.
+        let channel = |kr: f64, kg: f64, kb: f64| ((r * kr + g * kg + b * kb).clamp(0.0, 1.0) * 255.0).round() as u8;
+        Color {
+            r: channel(-0.574, 1.430, 0.144),
+            g: channel(0.426, 0.430, 0.144),
+            b: channel(0.426, 1.430, -0.856),
+            a: self.a,
+        }
+    }
 }
 
 /// The part of a bitmap an image element shows, in source pixels, and the
@@ -114,5 +131,17 @@ mod tests {
         assert_eq!(Color::parse("transparent"), Some(Color::TRANSPARENT));
         assert_eq!(Color::parse("#12"), None);
         assert_eq!(Color::parse("#ññ"), None);
+    }
+
+    #[test]
+    fn dark_mode_swaps_lightness_and_keeps_hue() {
+        // Excalidraw's dark canvas (#121212) is white run through its filter.
+        assert_eq!(Color::WHITE.dark(), Color::rgba(18, 18, 18, 255));
+        assert_eq!(Color::rgba(30, 30, 30, 255).dark(), Color::rgba(211, 211, 211, 255));
+        assert_eq!(Color::rgba(0, 0, 0, 77).dark().a, 77);
+        let red = Color::parse("#e03131").unwrap().dark();
+        assert!(red.r > red.g && red.r > red.b, "still red: {red:?}");
+        let blue = Color::parse("#1971c2").unwrap().dark();
+        assert!(blue.b > blue.r && u16::from(blue.b) + u16::from(blue.g) > 300, "a lighter blue: {blue:?}");
     }
 }

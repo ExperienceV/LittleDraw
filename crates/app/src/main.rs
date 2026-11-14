@@ -10,9 +10,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use board_core::kurbo::{Affine, BezPath, Point, Rect, RoundedRect, Shape, Size, Vec2};
-use board_core::manager_ui::{ManagerAction, ManagerState, Selection, ThemeMode};
+use board_core::manager_ui::{ManagerAction, ManagerState, Selection};
 use board_core::{
-    export, Button, Color, Cursor, Document, DrawOp, Editor, Frame, Item, Key, Modifiers, Request,
+    export, Button, Color, Cursor, Document, DrawOp, Editor, Frame, Item, Key, Modifiers, Request, Theme,
 };
 use serde_json::Value;
 use vello::util::{RenderContext, RenderSurface};
@@ -75,6 +75,8 @@ enum Screen {
 }
 
 struct App {
+    /// The editor's theme as last seen, to notice when the user switches it.
+    theme: Theme,
     context: RenderContext,
     renderers: Vec<Option<Renderer>>,
     surface: Option<(RenderSurface<'static>, Arc<dyn Window>)>,
@@ -452,7 +454,10 @@ impl App {
                     let _ = std::process::Command::new("xdg-open").arg(store.root()).spawn();
                 }
             }
-            ManagerAction::ToggleTheme(_) => {}
+            ManagerAction::ToggleTheme(theme) => {
+                // The editor follows; the end of the event loop remembers it.
+                self.editor.set_theme(theme);
+            }
         }
     }
 
@@ -542,7 +547,7 @@ impl App {
             Screen::Editor { board_id } => {
                 let mut f = self.editor.frame();
                 if board_id.is_some() {
-                    append_back_button(&mut f, self.cursor);
+                    append_back_button(&mut f, self.cursor, self.editor.theme());
                 }
                 frame = f;
                 &self.editor.document().files
@@ -589,10 +594,23 @@ impl App {
     }
 }
 
-fn append_back_button(frame: &mut Frame, cursor: Point) {
+fn append_back_button(frame: &mut Frame, cursor: Point, theme: Theme) {
     let hovered = BACK_BTN_RECT.contains(cursor);
-    let bg = if hovered { Color::rgba(241, 240, 246, 245) } else { Color::rgba(255, 255, 255, 235) };
-    let border = if hovered { Color::rgba(105, 101, 219, 255) } else { Color::rgba(210, 208, 200, 255) };
+    // (idle, hovered) backdrop, (idle, hovered) border, text.
+    let (bg, border, text) = match theme {
+        Theme::Light => (
+            (Color::rgba(255, 255, 255, 235), Color::rgba(241, 240, 246, 245)),
+            (Color::rgba(210, 208, 200, 255), Color::rgba(105, 101, 219, 255)),
+            Color::rgba(30, 30, 36, 255),
+        ),
+        Theme::Dark => (
+            (Color::rgba(35, 35, 41, 235), Color::rgba(49, 48, 59, 245)),
+            (Color::rgba(62, 62, 74, 255), Color::rgba(168, 165, 255, 255)),
+            Color::rgba(227, 227, 232, 255),
+        ),
+    };
+    let bg = if hovered { bg.1 } else { bg.0 };
+    let border = if hovered { border.1 } else { border.0 };
     let rr = RoundedRect::from_rect(BACK_BTN_RECT, 8.0).to_path(0.1);
     let mut ops = vec![
         DrawOp::fill(rr.clone(), bg),
@@ -601,7 +619,7 @@ fn append_back_button(frame: &mut Frame, cursor: Point) {
     let mut text_path = BezPath::new();
     board_core::text::append_line("<- Proyectos", 2, 13.0, Point::new(26.0, 33.5), &mut text_path);
     if !text_path.is_empty() {
-        ops.push(DrawOp::fill(text_path, Color::rgba(30, 30, 36, 255)));
+        ops.push(DrawOp::fill(text_path, text));
     }
     frame.items.push(Item { transform: Affine::IDENTITY, opacity: 1.0, ops: Rc::new(ops) });
 }
@@ -872,6 +890,13 @@ impl ApplicationHandler for App {
                 self.needs_thumb = true;
             }
         }
+        if self.editor.theme() != self.theme {
+            self.theme = self.editor.theme();
+            if let Some(manager) = &mut self.manager {
+                manager.theme = self.theme;
+            }
+            remember_theme(self.theme);
+        }
         self.update_title();
         if let Some((_, window)) = &self.surface {
             let icon = match self.screen {
@@ -899,16 +924,50 @@ fn untitled_path() -> PathBuf {
         .expect("some untitled name is free")
 }
 
+/// Where the chosen theme is remembered between runs:
+/// `$XDG_CONFIG_HOME/board/theme` (or `~/.config/board/theme`).
+fn theme_file() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")))?;
+    Some(config.join("board").join("theme"))
+}
+
+fn remembered_theme() -> Option<Theme> {
+    match std::fs::read_to_string(theme_file()?).ok()?.trim() {
+        "dark" => Some(Theme::Dark),
+        "light" => Some(Theme::Light),
+        _ => None,
+    }
+}
+
+fn remember_theme(theme: Theme) {
+    let name = match theme {
+        Theme::Light => "light",
+        Theme::Dark => "dark",
+    };
+    let saved = theme_file().ok_or_else(|| "no home directory".to_owned()).and_then(|file| {
+        let dir = file.parent().expect("the theme file is inside a directory");
+        std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&file, name)).map_err(|e| e.to_string())
+    });
+    if let Err(err) = saved {
+        eprintln!("could not remember the theme: {err}");
+    }
+}
+
 struct Args {
     file: Option<PathBuf>,
     workspace: Option<PathBuf>,
     svg: Option<PathBuf>,
     png: Option<PathBuf>,
     scale: f64,
+    /// Theme forced for this run, overriding the remembered one.
+    theme: Option<Theme>,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { file: None, workspace: None, svg: None, png: None, scale: 1.0 };
+    let mut args = Args { file: None, workspace: None, svg: None, png: None, scale: 1.0, theme: None };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -919,6 +978,8 @@ fn parse_args() -> Result<Args, String> {
                 let value = it.next().ok_or("--scale needs a number")?;
                 args.scale = value.parse().ok().filter(|s| *s > 0.0).ok_or("--scale must be a positive number")?;
             }
+            "--dark" => args.theme = Some(Theme::Dark),
+            "--light" => args.theme = Some(Theme::Light),
             "-h" | "--help" => return Err(String::new()),
             flag if flag.starts_with('-') => return Err(format!("unknown option {flag}")),
             _ if args.file.is_none() => args.file = Some(arg.into()),
@@ -933,7 +994,9 @@ fn main() {
         if !err.is_empty() {
             eprintln!("error: {err}");
         }
-        eprintln!("usage: board-app [FILE.excalidraw] [--workspace DIR] [--svg OUT.svg] [--png OUT.png [--scale N]]");
+        eprintln!(
+            "usage: board-app [FILE.excalidraw] [--workspace DIR] [--dark | --light] [--svg OUT.svg] [--png OUT.png [--scale N]]"
+        );
         std::process::exit(2);
     });
 
@@ -972,6 +1035,9 @@ fn main() {
 
     let seed = SystemTime::now().duration_since(UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64);
     let mut editor = Editor::new(seed);
+    // One theme for the manager and the editor.
+    let theme = args.theme.or_else(remembered_theme).unwrap_or_default();
+    editor.set_theme(theme);
     let (screen, store, manager, path) = if let Some(file) = args.file {
         if let Some(doc) = document {
             editor.load(doc);
@@ -984,13 +1050,14 @@ fn main() {
         let mgr = ManagerState::new(
             store.workspace().clone(),
             Size::new(1320.0, 840.0),
-            ThemeMode::Light,
+            theme,
             now_ms_u64(),
         );
         (Screen::Manager, Some(store), Some(mgr), untitled_path())
     };
 
     let mut app = App {
+        theme,
         context: RenderContext::new(),
         renderers: Vec::new(),
         surface: None,

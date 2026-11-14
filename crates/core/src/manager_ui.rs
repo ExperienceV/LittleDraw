@@ -10,6 +10,7 @@ use kurbo::{Affine, BezPath, Point, Rect, RoundedRect, Shape, Size};
 use crate::draw::{Color, DrawOp, Frame, Item, Style};
 use crate::editor::Key;
 use crate::text;
+use crate::ui::Theme;
 use crate::workspace::{Board, Project, Workspace, PROJECT_COLORS, RECENT_LIMIT};
 
 const UI_FONT: i64 = 2; // Liberation Sans
@@ -20,25 +21,6 @@ const CARD_MIN_W: f64 = 230.0;
 const CARD_H: f64 = 204.0;
 const THUMB_H: f64 = 132.0;
 const CARD_GAP: f64 = 16.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ThemeMode {
-    Light,
-    Dark,
-}
-
-impl ThemeMode {
-    pub fn toggle(self) -> Self {
-        match self {
-            Self::Light => Self::Dark,
-            Self::Dark => Self::Light,
-        }
-    }
-
-    pub fn is_dark(self) -> bool {
-        matches!(self, Self::Dark)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
@@ -62,7 +44,7 @@ pub enum ManagerAction {
     ExportBoard(String),
     ImportBoards(String),
     OpenWorkspaceFolder,
-    ToggleTheme(ThemeMode),
+    ToggleTheme(Theme),
 }
 
 #[derive(Clone, Debug)]
@@ -159,9 +141,9 @@ struct Palette {
 }
 
 impl Palette {
-    fn for_theme(theme: ThemeMode) -> Self {
+    fn for_theme(theme: Theme) -> Self {
         match theme {
-            ThemeMode::Light => Self {
+            Theme::Light => Self {
                 bg: Color::rgba(246, 245, 241, 255),
                 sidebar: Color::rgba(239, 237, 231, 255),
                 surface: Color::rgba(255, 255, 255, 255),
@@ -175,7 +157,7 @@ impl Palette {
                 hover: Color::rgba(0, 0, 0, 14),
                 selected: Color::rgba(105, 101, 219, 28),
             },
-            ThemeMode::Dark => Self {
+            Theme::Dark => Self {
                 bg: Color::rgba(18, 18, 20, 255),
                 sidebar: Color::rgba(25, 25, 29, 255),
                 surface: Color::rgba(34, 34, 40, 255),
@@ -196,7 +178,7 @@ impl Palette {
 pub struct ManagerState {
     pub workspace: Workspace,
     pub selection: Selection,
-    pub theme: ThemeMode,
+    pub theme: Theme,
     pub query: String,
     pub search_focused: bool,
     pub scroll_y: f64,
@@ -212,7 +194,7 @@ pub struct ManagerState {
 }
 
 impl ManagerState {
-    pub fn new(workspace: Workspace, size: Size, theme: ThemeMode, now_ms: u64) -> Self {
+    pub fn new(workspace: Workspace, size: Size, theme: Theme, now_ms: u64) -> Self {
         Self {
             workspace,
             selection: Selection::Recent,
@@ -392,7 +374,7 @@ impl ManagerState {
             }
             HitTarget::OpenWorkspaceFolder => return Some(ManagerAction::OpenWorkspaceFolder),
             HitTarget::ToggleTheme => {
-                self.theme = self.theme.toggle();
+                self.theme = self.theme.toggled();
                 return Some(ManagerAction::ToggleTheme(self.theme));
             }
             HitTarget::SearchBox => {}
@@ -578,7 +560,7 @@ impl ManagerState {
         // Sidebar header + theme button
         draw_text(&mut ops, "Boards", Point::new(18.0, 34.0), 20.0, pal.text);
         let theme_rect = Rect::new(SIDEBAR_W - 86.0, 14.0, SIDEBAR_W - 14.0, 42.0);
-        let theme_label = if self.theme.is_dark() { "Oscuro" } else { "Claro" };
+        let theme_label = if self.theme == Theme::Dark { "Oscuro" } else { "Claro" };
         draw_button(&mut hits, &mut ops, theme_rect, theme_label, pal.surface, pal.border, pal.text, HitTarget::ToggleTheme);
 
         // Recent item
@@ -1067,7 +1049,7 @@ mod tests {
 
     #[test]
     fn opens_and_cancels_new_project_dialog() {
-        let mut mgr = ManagerState::new(Workspace::default(), Size::new(1000.0, 700.0), ThemeMode::Light, 1_000_000);
+        let mut mgr = ManagerState::new(Workspace::default(), Size::new(1000.0, 700.0), Theme::Light, 1_000_000);
         let _ = mgr.frame();
         let new_proj = mgr.hits.iter().find(|h| matches!(h.target, HitTarget::NewProject)).unwrap().rect;
         assert!(mgr.click(new_proj.center()).is_none());

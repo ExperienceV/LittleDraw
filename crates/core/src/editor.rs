@@ -20,9 +20,9 @@ use crate::hit::hit;
 use crate::rough::Random;
 use crate::shape::{element_ops, outline};
 use crate::text::{self, Line};
-use crate::ui::{self, Action, Chrome, ColorTarget, Layer, Sections, Style, ACCENT};
+use crate::ui::{self, Action, Chrome, ColorTarget, Layer, Sections, Style};
 
-pub use crate::ui::Tool;
+pub use crate::ui::{Theme, Tool};
 
 /// Hit slack around strokes and handles, in screen pixels.
 const HIT_TOLERANCE: f64 = 6.0;
@@ -241,6 +241,7 @@ pub struct Editor {
     editing: Option<TextEdit>,
     /// The color whose palette popup is open.
     palette: Option<ColorTarget>,
+    theme: Theme,
     /// The last element is a line or arrow being laid out click by click;
     /// its final point floats under the pointer until the next click.
     placing: bool,
@@ -273,6 +274,7 @@ impl Editor {
             selected: HashSet::new(),
             editing: None,
             palette: None,
+            theme: Theme::Light,
             placing: false,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -365,6 +367,20 @@ impl Editor {
         self.selected = HashSet::from([el.id.clone()]);
         self.tool = Tool::Select;
         self.doc.elements.push(el);
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.theme
+    }
+
+    /// Switches between light and dark mode. Only how things are shown
+    /// changes: the document keeps its colors, as in Excalidraw.
+    pub fn set_theme(&mut self, theme: Theme) {
+        if self.theme != theme {
+            self.theme = theme;
+            // Cached shapes carry the old theme's colors.
+            self.cache.clear();
+        }
     }
 
     /// Whether there are changes since the last load or [`Self::mark_saved`].
@@ -1073,6 +1089,7 @@ impl Editor {
                 self.palette = (self.palette != Some(target)).then_some(target);
                 return;
             }
+            Action::Theme(theme) => return self.set_theme(theme),
             Action::Stroke(color) => self.style.stroke_color = color.to_owned(),
             Action::Background(color) => self.style.background_color = color.to_owned(),
             Action::Fill(fill) => self.style.fill_style = fill,
@@ -1159,7 +1176,7 @@ impl Editor {
     fn chrome(&self) -> Chrome {
         let (style, sections) = self.shown_style();
         let show_panel = !self.selected.is_empty() || self.editing.is_some() || element_kind(self.tool).is_some();
-        ui::layout(self.size, self.tool, show_panel.then_some((&style, sections)), self.palette)
+        ui::layout(self.size, self.tool, show_panel.then_some((&style, sections)), self.palette, self.theme)
     }
 
     /// Moves the selection (and its labels) in the stacking order.
@@ -1584,6 +1601,8 @@ impl Editor {
             Key::Up => self.nudge(Vec2::new(0.0, -1.0), mods),
             Key::Down => self.nudge(Vec2::new(0.0, 1.0), mods),
             Key::Home | Key::End => {}
+            // Excalidraw's shortcut for the theme.
+            Key::Char('d') if mods.alt && mods.shift => self.set_theme(self.theme.toggled()),
             Key::Char(c) if mods.ctrl => match c {
                 'z' if mods.shift => self.redo(),
                 'z' => self.undo(),
@@ -1859,7 +1878,15 @@ impl Editor {
         match self.cache.get(&el.id) {
             Some((k, ops)) if *k == key => ops.clone(),
             _ => {
-                let ops = Rc::new(element_ops(el));
+                let mut ops = element_ops(el);
+                if self.theme == Theme::Dark {
+                    // Pictures keep their own colors; everything else is shown
+                    // in its dark rendition.
+                    for op in ops.iter_mut().filter(|op| !matches!(op.style, crate::draw::Style::Image { .. })) {
+                        op.color = op.color.dark();
+                    }
+                }
+                let ops = Rc::new(ops);
                 self.cache.insert(el.id.clone(), (key, ops.clone()));
                 ops
             }
@@ -1896,14 +1923,17 @@ impl Editor {
         self.chrome().draw(&mut overlay);
         items.push(Item { transform: Affine::IDENTITY, opacity: 1.0, ops: Rc::new(overlay) });
 
-        Frame { background: background(&self.doc), items }
+        let canvas = background(&self.doc);
+        Frame { background: if self.theme == Theme::Dark { canvas.dark() } else { canvas }, items }
     }
 
     fn selection_ops(&self, ops: &mut Vec<DrawOp>) {
+        let colors = ui::colors(self.theme);
+        let accent = colors.accent;
         let single = self.single_selection();
         if !single.is_some_and(|e| has_point_grips(&e.kind)) {
             for (to_screen, rect) in self.selection_boxes() {
-                ops.push(DrawOp::stroke(to_screen * rect.to_path(0.1), ACCENT, 1.0));
+                ops.push(DrawOp::stroke(to_screen * rect.to_path(0.1), accent, 1.0));
             }
         }
         let half = HANDLE_SIZE / 2.0;
@@ -1917,19 +1947,19 @@ impl Editor {
             let path = Affine::translate(at.to_vec2()) * shape;
             // Midpoints are only suggestions, so they are drawn fainter.
             let alpha = if matches!(grip, Grip::Mid(_)) { 110 } else { 255 };
-            ops.push(DrawOp::fill(path.clone(), Color::WHITE));
-            ops.push(DrawOp::stroke(path, Color { a: alpha, ..ACCENT }, 1.0));
+            ops.push(DrawOp::fill(path.clone(), colors.canvas));
+            ops.push(DrawOp::stroke(path, Color { a: alpha, ..accent }, 1.0));
         }
         if let Some(shape) = self.bind_hover.as_deref().and_then(|id| self.index_of(id)) {
             // The shape an arrow end is about to attach to.
             let shape = &self.doc.elements[shape];
             let path = self.view() * shape.transform() * outline(shape);
-            ops.push(DrawOp::stroke(path, Color { a: 150, ..ACCENT }, 3.0));
+            ops.push(DrawOp::stroke(path, Color { a: 150, ..accent }, 3.0));
         }
         if let Some(Drag::Marquee { origin, current }) = &self.drag {
             let path = self.view() * Rect::from_points(*origin, *current).to_path(0.1);
-            ops.push(DrawOp::fill(path.clone(), Color { a: 26, ..ACCENT }));
-            ops.push(DrawOp::stroke(path, ACCENT, 1.0));
+            ops.push(DrawOp::fill(path.clone(), Color { a: 26, ..accent }));
+            ops.push(DrawOp::stroke(path, accent, 1.0));
         }
     }
 
@@ -1946,7 +1976,12 @@ impl Editor {
         let mut path = BezPath::new();
         path.move_to((x, top));
         path.line_to((x, top + size * line_height));
-        let color = Color::parse(&el.stroke_color).unwrap_or(ACCENT);
+        // The caret takes the text's color, as shown in this theme.
+        let color = match (Color::parse(&el.stroke_color), self.theme) {
+            (Some(color), Theme::Dark) => color.dark(),
+            (Some(color), Theme::Light) => color,
+            (None, _) => ui::colors(self.theme).accent,
+        };
         ops.push(DrawOp::stroke(self.view() * el.transform() * path, color, 1.5));
     }
 }
@@ -2228,7 +2263,8 @@ mod tests {
         press(&mut ed, Action::Background("#ffc9c9"));
         assert!(has_fill(&ed));
         ed.key_down(Key::Escape, NONE);
-        assert!(ed.chrome().buttons.iter().all(|b| matches!(b.action, Action::Tool(_))), "no selection, no panel");
+        let outside_panel = |b: &ui::Button| matches!(b.action, Action::Tool(_) | Action::Theme(_));
+        assert!(ed.chrome().buttons.iter().all(outside_panel), "no selection, no panel");
     }
 
     #[test]
@@ -2701,6 +2737,36 @@ mod tests {
         ed.undo();
         ed.undo();
         assert!(ed.document().elements.is_empty());
+    }
+
+    #[test]
+    fn dark_mode_recolors_what_is_shown_but_not_the_document() {
+        let mut ed = editor_with_rect();
+        press(&mut ed, Action::Background("#ffc9c9"));
+        ed.pointer_move(Point::new(700.0, 600.0), NONE);
+        ed.insert_image("data:image/png;base64,AAAA", "image/png", 40.0, 40.0, 0.0);
+        let (saved, steps) = (ed.document().to_json(), ed.undo.len());
+        let light = ed.frame();
+        assert_eq!(light.background, Color::WHITE);
+
+        press(&mut ed, Action::Theme(Theme::Dark));
+        assert_eq!(ed.theme(), Theme::Dark);
+        let dark = ed.frame();
+        assert_eq!(dark.background, Color::rgba(18, 18, 18, 255));
+        // The rectangle: fill and stroke in their dark renditions.
+        let colors = |frame: &Frame, item: usize| frame.items[item].ops.iter().map(|op| op.color).collect::<Vec<_>>();
+        let expected: Vec<Color> = colors(&light, 0).into_iter().map(Color::dark).collect();
+        assert_eq!(colors(&dark, 0), expected);
+        assert_ne!(colors(&dark, 0), colors(&light, 0));
+        // The picture is left alone, and nothing changed in the file.
+        assert_eq!(colors(&dark, 1), colors(&light, 1));
+        assert_eq!(ed.document().to_json(), saved);
+        assert_eq!(ed.undo.len(), steps, "switching theme is not an undo step");
+
+        ed.key_down(Key::Char('d'), Modifiers { shift: true, alt: true, ctrl: false });
+        assert_eq!(ed.theme(), Theme::Light);
+        assert_eq!(colors(&ed.frame(), 0), colors(&light, 0));
+        assert_eq!(ed.document().elements.len(), 2, "the shortcut did not pick the diamond tool");
     }
 
     #[test]
