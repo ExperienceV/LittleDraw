@@ -1,6 +1,6 @@
-# LittleBoards
+# LittleDraw
 
-![LittleBoards](docs/screenshots/littleboards.png)
+![LittleDraw](docs/screenshots/littledraw.png)
 
 Motor de dibujo vectorial **nativo en Rust**, con un gestor de proyectos y pizarras. Abre y guarda archivos `.excalidraw` y se ejecuta directamente en GPU, **sin Chromium ni Electron**.
 

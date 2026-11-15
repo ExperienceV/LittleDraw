@@ -35,7 +35,7 @@ mod store;
 use render::{encode, render_to_png_bytes, renderer_options, to_peniko, Images};
 use store::WorkspaceStore;
 
-const APP_NAME: &str = "LittleBoards";
+const APP_NAME: &str = "LittleDraw";
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 const DRAWING_EXTENSION: &str = "excalidraw";
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(700);
