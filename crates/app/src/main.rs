@@ -27,6 +27,7 @@ mod render;
 
 use render::{encode, renderer_options, to_peniko, Images};
 
+const APP_NAME: &str = "LittleDraw";
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 const DRAWING_EXTENSION: &str = "excalidraw";
 
@@ -201,7 +202,7 @@ impl App {
         if let Some((_, window)) = &self.surface {
             let name = self.path.file_name().unwrap_or_default().to_string_lossy();
             let mark = if self.editor.is_modified() { " •" } else { "" };
-            window.set_title(&format!("{name}{mark} — Board"));
+            window.set_title(&format!("{name}{mark} — {APP_NAME}"));
         }
     }
 
