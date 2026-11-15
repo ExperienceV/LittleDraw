@@ -1,0 +1,10 @@
+# Rust build output
+/target/
+
+# Logs and local files
+*.log
+.env
+.env.*
+.DS_Store
+.vscode/
+.idea/
