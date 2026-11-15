@@ -558,7 +558,7 @@ impl ManagerState {
         line(&mut ops, Point::new(SIDEBAR_W, 0.0), Point::new(SIDEBAR_W, h), pal.border, 1.0);
 
         // Sidebar header + theme button
-        draw_text(&mut ops, "Boards", Point::new(18.0, 34.0), 20.0, pal.text);
+        draw_text(&mut ops, "LittleBoards", Point::new(18.0, 34.0), 20.0, pal.text);
         let theme_rect = Rect::new(SIDEBAR_W - 86.0, 14.0, SIDEBAR_W - 14.0, 42.0);
         let theme_label = if self.theme == Theme::Dark { "Oscuro" } else { "Claro" };
         draw_button(&mut hits, &mut ops, theme_rect, theme_label, pal.surface, pal.border, pal.text, HitTarget::ToggleTheme);

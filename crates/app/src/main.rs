@@ -35,6 +35,7 @@ mod store;
 use render::{encode, render_to_png_bytes, renderer_options, to_peniko, Images};
 use store::WorkspaceStore;
 
+const APP_NAME: &str = "LittleBoards";
 const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 const DRAWING_EXTENSION: &str = "excalidraw";
 const AUTOSAVE_DEBOUNCE: Duration = Duration::from_millis(700);
@@ -509,7 +510,7 @@ impl App {
             return;
         };
         match &self.screen {
-            Screen::Manager => window.set_title("Boards — Gestor de proyectos"),
+            Screen::Manager => window.set_title(&format!("{APP_NAME} — Gestor de proyectos")),
             Screen::Editor { board_id: Some(id) } => {
                 let name = self
                     .store
@@ -517,12 +518,12 @@ impl App {
                     .and_then(|s| s.workspace().find_board(id))
                     .map_or("Pizarra", |e| e.board.name.as_str());
                 let mark = if self.editor.is_modified() { " •" } else { "" };
-                window.set_title(&format!("{name}{mark} — Boards"));
+                window.set_title(&format!("{name}{mark} — {APP_NAME}"));
             }
             Screen::Editor { board_id: None } => {
                 let name = self.path.file_name().unwrap_or_default().to_string_lossy();
                 let mark = if self.editor.is_modified() { " •" } else { "" };
-                window.set_title(&format!("{name}{mark} — Board"));
+                window.set_title(&format!("{name}{mark} — {APP_NAME}"));
             }
         }
     }
