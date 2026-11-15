@@ -1,8 +1,18 @@
 # LittleDraw
 
+![LittleDraw](docs/screenshots/littledraw.png)
+
 > **Motor basado en Excalidraw:** Este proyecto es un motor de dibujo vectorial nativo en **Rust** basado en [Excalidraw](https://github.com/excalidraw/excalidraw) (MIT). Reproduce su diseño, estética *hand-drawn*, comportamiento de herramientas y compatibilidad con el formato `.excalidraw`, portando algoritmos de [rough.js](https://github.com/rough-stuff/rough) y [perfect-freehand](https://github.com/steveruizok/perfect-freehand) para ejecutarse directamente en GPU sin navegador, Electron ni Chromium.
 
 ## Capturas
+
+> Las capturas del editor y del gestor usan **datos de ejemplo inventados**.
+
+### Editor
+
+| Tema claro | Tema oscuro |
+|---|---|
+| ![Editor en tema claro, con una figura seleccionada y el panel de estilos](docs/screenshots/editor-light.png) | ![Editor en tema oscuro, con una figura seleccionada y el panel de estilos](docs/screenshots/editor-dark.png) |
 
 ### Editor y herramientas
 ![Interfaz del editor con barra de herramientas, panel de estilos, figuras, flecha anclada y edición de texto](docs/screenshots/editor-ui.png)
@@ -12,6 +22,14 @@
 
 ### Renderizado de `samples/demo.excalidraw`
 ![Exportación a PNG de samples/demo.excalidraw mostrando rellenos hachure, cross-hatch, solid, trazos punteados, flechas curvas y rotación](docs/screenshots/demo-render.png)
+
+### Gestor de proyectos y pizarras
+
+El gestor (proyectos con color, recientes, búsqueda y miniaturas) vive en la rama `manager`; este código no lo incluye.
+
+| Tema claro | Tema oscuro |
+|---|---|
+| ![Gestor de proyectos en tema claro](docs/screenshots/manager-light.png) | ![Gestor de proyectos en tema oscuro](docs/screenshots/manager-dark.png) |
 
 ## Arquitectura
 
